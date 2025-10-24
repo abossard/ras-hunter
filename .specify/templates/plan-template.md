@@ -31,7 +31,15 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+Project MUST satisfy all current ras-hunter Constitution gates:
+
+- Simplicity: New dependency or abstraction documented with justification (benefit > cost).
+- Explicitness: Each new module/function documents inputs/outputs/side-effects (docstring or README snippet).
+- E2E & Contract Coverage: Planned user journeys and any external contract changes have a corresponding planned E2E or contract test.
+- Diagnostic Errors: Planned features specify primary failure modes and contextual data to surface.
+- Evolution Safety: Any anticipated breaking change has a migration outline + proposed version impact.
+
+Failure to meet any gate: STOP and revise plan before implementation.
 
 ## Project Structure
 
