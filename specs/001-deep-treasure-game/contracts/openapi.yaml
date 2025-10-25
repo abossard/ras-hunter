@@ -1,0 +1,1138 @@
+openapi: 3.1.0
+info:
+  title: Ras's Deep Treasure Game API
+  version: 1.0.0
+  description: |
+    REST API for multiplayer submarine treasure hunt game.
+    Supports 20 concurrent players navigating a fog-of-war 32×32 grid.
+    
+    **Authentication**: All endpoints except `/register` and `/login` require JWT bearer token.
+    
+    **Error Handling**: All errors return `error_code` and diagnostic context per FR-052.
+  contact:
+    name: API Support
+    
+servers:
+  - url: http://localhost:8000
+    description: Local development server
+  - url: https://api.ras-hunter.example.com
+    description: Production server
+
+tags:
+  - name: Authentication
+    description: User registration and login (FR-001 to FR-006)
+  - name: Game Actions
+    description: Submarine actions within match (FR-013 to FR-037)
+  - name: Communication
+    description: Message broadcasts and direct messages (FR-038 to FR-040)
+  - name: Information
+    description: Status queries and replay logs (FR-053 to FR-060)
+
+security:
+  - bearerAuth: []
+
+paths:
+  /api/register:
+    post:
+      tags:
+        - Authentication
+      summary: Register new user account
+      description: |
+        Create user with username and password (FR-001).
+        Username must be 3-20 characters (alphanumeric + underscore).
+        Password must be at least 8 characters.
+      operationId: registerUser
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+            examples:
+              valid:
+                value:
+                  username: "player_42"
+                  password: "securePass123"
+      responses:
+        '201':
+          description: User created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterResponse'
+              example:
+                username: "player_42"
+                created_at: "2025-10-24T12:00:00Z"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: Username already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error_code: "USERNAME_EXISTS"
+                message: "Username 'player_42' is already registered"
+                context:
+                  username: "player_42"
+                  available_suggestions: ["player_43", "player_42_alt"]
+
+  /api/login:
+    post:
+      tags:
+        - Authentication
+      summary: Authenticate user and obtain JWT token
+      description: |
+        Login with username and password to receive JWT token (FR-002).
+        Token expires after 24 hours and must be refreshed.
+      operationId: loginUser
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            examples:
+              valid:
+                value:
+                  username: "player_42"
+                  password: "securePass123"
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+              example:
+                token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                expires_at: "2025-10-25T12:00:00Z"
+                username: "player_42"
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error_code: "INVALID_CREDENTIALS"
+                message: "Username or password is incorrect"
+                context:
+                  attempt_count: 3
+                  lockout_threshold: 5
+
+  /api/discover:
+    post:
+      tags:
+        - Game Actions
+      summary: Explore adjacent tile and reveal fog-of-war
+      description: |
+        Discover tile content at (x, y) 4-neighbor to current position (FR-014, FR-015).
+        Costs 1 oxygen and has 8-second cooldown.
+        Updates submarine's `known_fields` and `travel_log`.
+      operationId: discoverTile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiscoverRequest'
+            examples:
+              valid:
+                value:
+                  x: 5
+                  y: 7
+      responses:
+        '200':
+          description: Tile discovered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscoverResponse'
+              example:
+                tile_content: "tool"
+                tool_type: "sonar"
+                oxygen_remaining: 19
+                discoveries: 12
+                cooldown_ms: 8000
+        '400':
+          description: Invalid coordinates or cooldown active
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                not_adjacent:
+                  value:
+                    error_code: "TILE_NOT_ADJACENT"
+                    message: "Target tile (10, 15) is not adjacent to current position (5, 7)"
+                    context:
+                      current_position: { x: 5, y: 7 }
+                      target_position: { x: 10, y: 15 }
+                      valid_targets: [{ x: 4, y: 7 }, { x: 6, y: 7 }, { x: 5, y: 6 }, { x: 5, y: 8 }]
+                cooldown_active:
+                  value:
+                    error_code: "COOLDOWN_ACTIVE"
+                    message: "Discover action on cooldown for 3.5 seconds"
+                    context:
+                      remaining_ms: 3500
+                      retry_after: "2025-10-24T12:00:03.5Z"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Insufficient oxygen or submarine disabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error_code: "INSUFFICIENT_OXYGEN"
+                message: "Cannot discover: oxygen level is 0"
+                context:
+                  oxygen_remaining: 0
+                  required_oxygen: 1
+                  suggestion: "Surface to restore oxygen"
+
+  /api/surface:
+    post:
+      tags:
+        - Game Actions
+      summary: Surface submarine to restore oxygen and reset EMP counter
+      description: |
+        Begin 60-second surfacing operation (FR-017, FR-018).
+        Restores oxygen to 20, resets disabled_count to 0, makes submarine visible to all players.
+        Cannot take other actions while surfacing.
+      operationId: surfaceSubmarine
+      responses:
+        '202':
+          description: Surfacing initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SurfaceResponse'
+              example:
+                status: "surfaced"
+                duration_seconds: 60
+                completes_at: "2025-10-24T12:01:00Z"
+                oxygen_after: 20
+                disabled_count_after: 0
+        '400':
+          description: Already surfaced or invalid state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error_code: "ALREADY_SURFACED"
+                message: "Submarine is currently surfacing (30s remaining)"
+                context:
+                  remaining_seconds: 30
+                  completes_at: "2025-10-24T12:00:30Z"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/use_tool:
+    post:
+      tags:
+        - Game Actions
+      summary: Use tool from inventory
+      description: |
+        Activate single-use tool: EMP, sonar, or repair_kit (FR-024 to FR-030).
+        Removes tool from inventory after use.
+        EMP disables target for 30s, sonar reveals 7×7 area, repair_kit restores oxygen and clears EMP hits.
+      operationId: useTool
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UseToolRequest'
+            examples:
+              emp:
+                value:
+                  tool: "EMP"
+                  target_sub_id: "sub-player_42"
+              sonar:
+                value:
+                  tool: "sonar"
+              repair_kit:
+                value:
+                  tool: "repair_kit"
+      responses:
+        '200':
+          description: Tool used successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UseToolResponse'
+              examples:
+                emp_success:
+                  value:
+                    result: "EMP hit successful"
+                    target_sub_id: "sub-player_42"
+                    target_status: "disabled"
+                    target_disabled_until: "2025-10-24T12:00:30Z"
+                sonar_success:
+                  value:
+                    result: "Sonar scan complete"
+                    revealed_tiles:
+                      - { x: 3, y: 5, content: "empty" }
+                      - { x: 4, y: 5, content: "tool", tool_type: "EMP" }
+                      - { x: 5, y: 5, content: "treasure" }
+                repair_success:
+                  value:
+                    result: "Repair kit applied"
+                    oxygen_after: 20
+                    disabled_count_after: 0
+        '400':
+          description: Tool not in inventory or invalid target
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error_code: "TOOL_NOT_OWNED"
+                message: "Tool 'EMP' not found in inventory"
+                context:
+                  requested_tool: "EMP"
+                  available_tools: ["sonar", "repair_kit"]
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Target submarine not found or not in range
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error_code: "TARGET_NOT_IN_RANGE"
+                message: "Target submarine 'sub-player_99' is not adjacent"
+                context:
+                  target_sub_id: "sub-player_99"
+                  target_position: { x: 15, y: 20 }
+                  your_position: { x: 5, y: 7 }
+                  max_range: 1
+
+  /api/exchange_frequency:
+    post:
+      tags:
+        - Game Actions
+      summary: Exchange communication frequencies with adjacent submarine
+      description: |
+        Swap frequency_secret with adjacent submarine to enable direct messaging (FR-039, FR-040).
+        Both submarines add each other's frequency to `known_frequencies`.
+      operationId: exchangeFrequency
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExchangeFrequencyRequest'
+            examples:
+              valid:
+                value:
+                  target_sub_id: "sub-player_42"
+      responses:
+        '200':
+          description: Frequencies exchanged successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExchangeFrequencyResponse'
+              example:
+                your_frequency: "freq-abc123"
+                their_frequency: "freq-xyz789"
+                message: "You can now direct message sub-player_42"
+        '400':
+          description: Target not adjacent or already exchanged
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error_code: "FREQUENCY_ALREADY_KNOWN"
+                message: "You already know the frequency for sub-player_42"
+                context:
+                  target_sub_id: "sub-player_42"
+                  known_frequencies: ["freq-xyz789", "freq-def456"]
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/TargetNotFound'
+
+  /api/broadcast:
+    post:
+      tags:
+        - Communication
+      summary: Send message to all players in match
+      description: |
+        Broadcast message to channel "ALL" visible to all submarines (FR-038).
+        Anyone can send broadcasts without frequency exchange.
+      operationId: broadcastMessage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BroadcastRequest'
+            examples:
+              valid:
+                value:
+                  message: "Found treasure at (15, 20)!"
+      responses:
+        '200':
+          description: Message broadcast successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message_id: "msg-uuid-123"
+                sent_at: "2025-10-24T12:00:00Z"
+                to: "ALL"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/direct:
+    post:
+      tags:
+        - Communication
+      summary: Send direct message to submarine via known frequency
+      description: |
+        Send message to specific submarine using their frequency (FR-039, FR-040).
+        Requires frequency exchange first.
+      operationId: directMessage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DirectMessageRequest'
+            examples:
+              valid:
+                value:
+                  frequency: "freq-xyz789"
+                  message: "Meet at (10, 10) for alliance"
+      responses:
+        '200':
+          description: Direct message sent successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message_id: "msg-uuid-456"
+                sent_at: "2025-10-24T12:00:00Z"
+                to: "sub-player_42"
+        '400':
+          description: Frequency not known
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error_code: "FREQUENCY_UNKNOWN"
+                message: "You do not know frequency 'freq-xyz789'"
+                context:
+                  requested_frequency: "freq-xyz789"
+                  known_frequencies: ["freq-abc123", "freq-def456"]
+                  suggestion: "Use /api/exchange_frequency to learn new frequencies"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/status:
+    get:
+      tags:
+        - Information
+      summary: Get current submarine state
+      description: |
+        Retrieve full submarine state including position, oxygen, inventory, known_fields (FR-053, FR-054).
+        This is the authenticated player's personal view.
+      operationId: getSubmarineStatus
+      responses:
+        '200':
+          description: Submarine state retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmarineStatus'
+              example:
+                sub_id: "sub-player_42"
+                match_id: "match-uuid-001"
+                position: { x: 5, y: 7 }
+                home_base: { x: 0, y: 0 }
+                oxygen: 18
+                status: "submerged"
+                inventory: ["sonar", "EMP", "repair_kit"]
+                treasure_held: false
+                disabled_count: 1
+                frequency_secret: "freq-abc123"
+                known_frequencies: ["freq-xyz789", "freq-def456"]
+                known_fields:
+                  "5,7": "empty"
+                  "5,8": "tool"
+                  "6,7": "empty"
+                travel_log:
+                  - { x: 0, y: 0, timestamp: "2025-10-24T11:55:00Z", event: "spawned" }
+                  - { x: 1, y: 0, timestamp: "2025-10-24T11:56:00Z", event: "discovered" }
+                cooldowns:
+                  discover: 3500
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/game_state:
+    get:
+      tags:
+        - Information
+      summary: Get match-wide public state
+      description: |
+        Retrieve match status, active players count, treasure holder (if surfaced), leaderboard (FR-055, FR-056).
+        Does not reveal other players' exact positions unless they are surfaced.
+      operationId: getGameState
+      responses:
+        '200':
+          description: Game state retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GameState'
+              example:
+                match_id: "match-uuid-001"
+                status: "active"
+                active_players: 18
+                treasure_holder: "sub-player_99"
+                treasure_holder_surfaced: true
+                treasure_holder_position: { x: 20, y: 15 }
+                leaderboard:
+                  - { rank: 1, sub_id: "sub-player_99", distance_to_home: 5 }
+                  - { rank: 2, sub_id: "sub-player_42", distance_to_home: 12 }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/messages:
+    get:
+      tags:
+        - Information
+      summary: Get inbox of broadcasts and direct messages
+      description: |
+        Retrieve messages sent to "ALL" or to authenticated submarine's frequency (FR-057).
+        Returns messages from newest to oldest.
+      operationId: getMessages
+      parameters:
+        - name: limit
+          in: query
+          description: Maximum number of messages to return
+          schema:
+            type: integer
+            default: 50
+            maximum: 100
+        - name: before
+          in: query
+          description: Return messages before this timestamp (ISO 8601)
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Messages retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessagesResponse'
+              example:
+                items:
+                  - message_id: "msg-uuid-123"
+                    from_sub_id: "sub-player_99"
+                    to: "ALL"
+                    text: "Found treasure at (15, 20)!"
+                    sent_at: "2025-10-24T12:00:00Z"
+                  - message_id: "msg-uuid-456"
+                    from_sub_id: "sub-player_42"
+                    to: "sub-player_self"
+                    text: "Meet at (10, 10) for alliance"
+                    sent_at: "2025-10-24T11:59:00Z"
+                has_more: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/replay:
+    get:
+      tags:
+        - Information
+      summary: Get event log for match replay
+      description: |
+        Retrieve chronological events for authenticated submarine or full match (FR-058).
+        Useful for replay visualization and debugging.
+      operationId: getReplay
+      parameters:
+        - name: from
+          in: query
+          description: Start timestamp (ISO 8601)
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          description: End timestamp (ISO 8601)
+          schema:
+            type: string
+            format: date-time
+        - name: sub_id
+          in: query
+          description: Filter events for specific submarine (omit for all events)
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Replay events retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReplayResponse'
+              example:
+                events:
+                  - event_id: "evt-uuid-001"
+                    sub_id: "sub-player_42"
+                    position: { x: 0, y: 0 }
+                    event_type: "player_spawned"
+                    event_details: { home_base: { x: 0, y: 0 } }
+                    occurred_at: "2025-10-24T11:55:00Z"
+                  - event_id: "evt-uuid-002"
+                    sub_id: "sub-player_42"
+                    position: { x: 1, y: 0 }
+                    event_type: "tile_discovered"
+                    event_details: { tile_content: "tool", tool_type: "sonar" }
+                    occurred_at: "2025-10-24T11:56:00Z"
+                total_events: 127
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        JWT token obtained from `/api/login`.
+        Include in Authorization header: `Bearer <token>`.
+        Token expires after 24 hours.
+
+  schemas:
+    RegisterRequest:
+      type: object
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+          pattern: '^[a-zA-Z0-9_]{3,20}$'
+          example: "player_42"
+        password:
+          type: string
+          minLength: 8
+          format: password
+          example: "securePass123"
+
+    RegisterResponse:
+      type: object
+      properties:
+        username:
+          type: string
+          example: "player_42"
+        created_at:
+          type: string
+          format: date-time
+          example: "2025-10-24T12:00:00Z"
+
+    LoginRequest:
+      type: object
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+          example: "player_42"
+        password:
+          type: string
+          format: password
+          example: "securePass123"
+
+    LoginResponse:
+      type: object
+      properties:
+        token:
+          type: string
+          description: JWT bearer token (24-hour expiry)
+          example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+        expires_at:
+          type: string
+          format: date-time
+          example: "2025-10-25T12:00:00Z"
+        username:
+          type: string
+          example: "player_42"
+
+    DiscoverRequest:
+      type: object
+      required:
+        - x
+        - y
+      properties:
+        x:
+          type: integer
+          minimum: 0
+          maximum: 31
+          example: 5
+        y:
+          type: integer
+          minimum: 0
+          maximum: 31
+          example: 7
+
+    DiscoverResponse:
+      type: object
+      properties:
+        tile_content:
+          type: string
+          enum: [empty, tool, hazard, home_base, treasure]
+          example: "tool"
+        tool_type:
+          type: string
+          enum: [EMP, sonar, repair_kit]
+          example: "sonar"
+          nullable: true
+        hazard_type:
+          type: string
+          enum: [leak, pressure_spike]
+          example: "leak"
+          nullable: true
+        oxygen_remaining:
+          type: integer
+          minimum: 0
+          maximum: 20
+          example: 19
+        discoveries:
+          type: integer
+          description: Total tiles discovered by submarine
+          example: 12
+        cooldown_ms:
+          type: integer
+          description: Milliseconds until next discover action
+          example: 8000
+
+    SurfaceResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [surfaced]
+          example: "surfaced"
+        duration_seconds:
+          type: integer
+          example: 60
+        completes_at:
+          type: string
+          format: date-time
+          example: "2025-10-24T12:01:00Z"
+        oxygen_after:
+          type: integer
+          example: 20
+        disabled_count_after:
+          type: integer
+          example: 0
+
+    UseToolRequest:
+      type: object
+      required:
+        - tool
+      properties:
+        tool:
+          type: string
+          enum: [EMP, sonar, repair_kit]
+          example: "EMP"
+        target_sub_id:
+          type: string
+          description: Required for EMP, ignored for sonar/repair_kit
+          example: "sub-player_42"
+          nullable: true
+
+    UseToolResponse:
+      type: object
+      properties:
+        result:
+          type: string
+          example: "EMP hit successful"
+        target_sub_id:
+          type: string
+          example: "sub-player_42"
+          nullable: true
+        target_status:
+          type: string
+          enum: [disabled]
+          example: "disabled"
+          nullable: true
+        target_disabled_until:
+          type: string
+          format: date-time
+          example: "2025-10-24T12:00:30Z"
+          nullable: true
+        revealed_tiles:
+          type: array
+          items:
+            $ref: '#/components/schemas/TileInfo'
+          nullable: true
+        oxygen_after:
+          type: integer
+          example: 20
+          nullable: true
+        disabled_count_after:
+          type: integer
+          example: 0
+          nullable: true
+
+    TileInfo:
+      type: object
+      properties:
+        x:
+          type: integer
+        y:
+          type: integer
+        content:
+          type: string
+          enum: [empty, tool, hazard, home_base, treasure]
+        tool_type:
+          type: string
+          enum: [EMP, sonar, repair_kit]
+          nullable: true
+        hazard_type:
+          type: string
+          enum: [leak, pressure_spike]
+          nullable: true
+
+    ExchangeFrequencyRequest:
+      type: object
+      required:
+        - target_sub_id
+      properties:
+        target_sub_id:
+          type: string
+          example: "sub-player_42"
+
+    ExchangeFrequencyResponse:
+      type: object
+      properties:
+        your_frequency:
+          type: string
+          example: "freq-abc123"
+        their_frequency:
+          type: string
+          example: "freq-xyz789"
+        message:
+          type: string
+          example: "You can now direct message sub-player_42"
+
+    BroadcastRequest:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          maxLength: 500
+          example: "Found treasure at (15, 20)!"
+
+    DirectMessageRequest:
+      type: object
+      required:
+        - frequency
+        - message
+      properties:
+        frequency:
+          type: string
+          description: Recipient's frequency_secret
+          example: "freq-xyz789"
+        message:
+          type: string
+          maxLength: 500
+          example: "Meet at (10, 10) for alliance"
+
+    MessageResponse:
+      type: object
+      properties:
+        message_id:
+          type: string
+          format: uuid
+          example: "msg-uuid-123"
+        sent_at:
+          type: string
+          format: date-time
+          example: "2025-10-24T12:00:00Z"
+        to:
+          type: string
+          description: 'ALL for broadcast or sub_id for direct'
+          example: "sub-player_42"
+
+    SubmarineStatus:
+      type: object
+      properties:
+        sub_id:
+          type: string
+          example: "sub-player_42"
+        match_id:
+          type: string
+          format: uuid
+          example: "match-uuid-001"
+        position:
+          $ref: '#/components/schemas/Position'
+        home_base:
+          $ref: '#/components/schemas/Position'
+        oxygen:
+          type: integer
+          minimum: 0
+          maximum: 20
+          example: 18
+        status:
+          type: string
+          enum: [submerged, surfaced, disabled, destroyed]
+          example: "submerged"
+        inventory:
+          type: array
+          items:
+            type: string
+            enum: [EMP, sonar, repair_kit]
+          example: ["sonar", "EMP", "repair_kit"]
+        treasure_held:
+          type: boolean
+          example: false
+        disabled_count:
+          type: integer
+          example: 1
+        frequency_secret:
+          type: string
+          example: "freq-abc123"
+        known_frequencies:
+          type: array
+          items:
+            type: string
+          example: ["freq-xyz789", "freq-def456"]
+        known_fields:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            "5,7": "empty"
+            "5,8": "tool"
+        travel_log:
+          type: array
+          items:
+            $ref: '#/components/schemas/TravelLogEntry'
+        cooldowns:
+          type: object
+          additionalProperties:
+            type: integer
+          example:
+            discover: 3500
+
+    Position:
+      type: object
+      properties:
+        x:
+          type: integer
+          minimum: 0
+          maximum: 31
+        y:
+          type: integer
+          minimum: 0
+          maximum: 31
+
+    TravelLogEntry:
+      type: object
+      properties:
+        x:
+          type: integer
+        y:
+          type: integer
+        timestamp:
+          type: string
+          format: date-time
+        event:
+          type: string
+          example: "discovered"
+
+    GameState:
+      type: object
+      properties:
+        match_id:
+          type: string
+          format: uuid
+          example: "match-uuid-001"
+        status:
+          type: string
+          enum: [active, ended]
+          example: "active"
+        active_players:
+          type: integer
+          example: 18
+        treasure_holder:
+          type: string
+          example: "sub-player_99"
+          nullable: true
+        treasure_holder_surfaced:
+          type: boolean
+          example: true
+          nullable: true
+        treasure_holder_position:
+          $ref: '#/components/schemas/Position'
+          nullable: true
+        leaderboard:
+          type: array
+          items:
+            $ref: '#/components/schemas/LeaderboardEntry'
+
+    LeaderboardEntry:
+      type: object
+      properties:
+        rank:
+          type: integer
+          example: 1
+        sub_id:
+          type: string
+          example: "sub-player_99"
+        distance_to_home:
+          type: integer
+          description: Manhattan distance from home_base
+          example: 5
+
+    MessagesResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/MessageItem'
+        has_more:
+          type: boolean
+          example: true
+
+    MessageItem:
+      type: object
+      properties:
+        message_id:
+          type: string
+          format: uuid
+        from_sub_id:
+          type: string
+        to:
+          type: string
+          description: 'ALL or recipient sub_id'
+        text:
+          type: string
+        sent_at:
+          type: string
+          format: date-time
+
+    ReplayResponse:
+      type: object
+      properties:
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/EventItem'
+        total_events:
+          type: integer
+          example: 127
+
+    EventItem:
+      type: object
+      properties:
+        event_id:
+          type: string
+          format: uuid
+        sub_id:
+          type: string
+        position:
+          $ref: '#/components/schemas/Position'
+        event_type:
+          type: string
+          enum:
+            - player_spawned
+            - tile_discovered
+            - treasure_found
+            - emp_hit
+            - frequency_exchanged
+            - player_surfaced
+            - player_inactive_timeout
+            - match_won
+            - match_reset
+        event_details:
+          type: object
+          additionalProperties: true
+        occurred_at:
+          type: string
+          format: date-time
+
+    Error:
+      type: object
+      required:
+        - error_code
+        - message
+      properties:
+        error_code:
+          type: string
+          example: "TILE_NOT_ADJACENT"
+        message:
+          type: string
+          example: "Target tile (10, 15) is not adjacent to current position (5, 7)"
+        context:
+          type: object
+          additionalProperties: true
+          description: Diagnostic information for debugging
+          example:
+            current_position: { x: 5, y: 7 }
+            target_position: { x: 10, y: 15 }
+
+  responses:
+    BadRequest:
+      description: Invalid request parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error_code: "INVALID_USERNAME"
+            message: "Username must be 3-20 characters (alphanumeric + underscore)"
+            context:
+              username: "ab"
+              pattern: "^[a-zA-Z0-9_]{3,20}$"
+
+    Unauthorized:
+      description: Missing or invalid JWT token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error_code: "UNAUTHORIZED"
+            message: "JWT token is missing or expired"
+            context:
+              token_status: "expired"
+              expired_at: "2025-10-23T12:00:00Z"
+
+    TargetNotFound:
+      description: Target submarine not found or not adjacent
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error_code: "TARGET_NOT_FOUND"
+            message: "Submarine 'sub-player_99' does not exist in this match"
+            context:
+              target_sub_id: "sub-player_99"
+              match_id: "match-uuid-001"
