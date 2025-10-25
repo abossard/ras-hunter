@@ -7,10 +7,10 @@ Exports all SQLAlchemy ORM models for use throughout the application.
 Import order matters for relationship resolution.
 """
 
-from backend.src.models.user import User
-from backend.src.models.match import Match
-from backend.src.models.submarine import Submarine
-from backend.src.models.event import Event
+from models.user import User
+from models.match import Match
+from models.submarine import Submarine
+from models.event import Event
 
 __all__ = [
     "User",

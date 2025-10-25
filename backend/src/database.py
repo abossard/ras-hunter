@@ -12,7 +12,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
-from src.config import Settings, get_settings
+from config import Settings, get_settings
 
 
 class Base(DeclarativeBase):

@@ -11,7 +11,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 
-from src.config import get_settings
+from config import get_settings
 
 # Bearer token scheme for dependency injection
 security_scheme = HTTPBearer()

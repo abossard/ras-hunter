@@ -95,10 +95,10 @@ Based on plan.md, this is a web application with 3 main components:
 
 #### Database Models
 
-- [ ] T034 [P] [US1] Create User model in backend/src/models/user.py (username PK, password_hash, created_at, last_login_at per data-model.md)
-- [ ] T035 [P] [US1] Create Match model in backend/src/models/match.py (match_id PK, start_time, end_time, status, winner_username FK, map_configuration JSONB per data-model.md)
-- [ ] T036 [P] [US1] Create Submarine model in backend/src/models/submarine.py (sub_id PK, match_id FK, username FK, position_x/y, home_base_x/y, oxygen 0-20, status enum, inventory JSONB, known_fields JSONB, travel_log JSONB, cooldowns JSONB per data-model.md)
-- [ ] T037 [P] [US1] Create Event model in backend/src/models/event.py (event_id PK, match_id FK, sub_id FK, position_x/y, event_type, event_details JSONB, occurred_at per data-model.md)
+- [X] T034 [P] [US1] Create User model in backend/src/models/user.py (username PK, password_hash, created_at, last_login_at per data-model.md)
+- [X] T035 [P] [US1] Create Match model in backend/src/models/match.py (match_id PK, start_time, end_time, status, winner_username FK, map_configuration JSONB per data-model.md)
+- [X] T036 [P] [US1] Create Submarine model in backend/src/models/submarine.py (sub_id PK, match_id FK, username FK, position_x/y, home_base_x/y, oxygen 0-20, status enum, inventory JSONB, known_fields JSONB, travel_log JSONB, cooldowns JSONB per data-model.md)
+- [X] T037 [P] [US1] Create Event model in backend/src/models/event.py (event_id PK, match_id FK, sub_id FK, position_x/y, event_type, event_details JSONB, occurred_at per data-model.md)
 - [ ] T038 [US1] Create Alembic migration for User, Match, Submarine, Event tables in backend/alembic/versions/002_user_story_1_entities.py (includes indexes: match_id+status, match_id+position, last_action_timestamp)
 
 #### Services & Business Logic

@@ -11,7 +11,7 @@ from typing import Any
 import redis.asyncio as aioredis
 from redis.asyncio import Redis
 
-from src.config import get_settings
+from config import get_settings
 
 # Global Redis client (initialized at app startup)
 redis_client: Redis | None = None

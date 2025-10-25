@@ -12,7 +12,7 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
-from src.config import get_settings
+from config import get_settings
 
 # Global tracer instance
 tracer: trace.Tracer | None = None

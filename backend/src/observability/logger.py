@@ -11,7 +11,7 @@ from typing import Any
 
 from opentelemetry import trace
 
-from src.config import get_settings
+from config import get_settings
 
 
 class JSONFormatter(logging.Formatter):

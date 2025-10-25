@@ -1,6 +1,6 @@
 """Cache layer package."""
 
-from src.cache.redis_client import (
+from cache.redis_client import (
     close_redis,
     delete_value,
     exists,

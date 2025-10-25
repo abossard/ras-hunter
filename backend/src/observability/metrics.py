@@ -11,7 +11,7 @@ from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
 
-from src.config import get_settings
+from config import get_settings
 
 # Global meter instance
 meter: metrics.Meter | None = None

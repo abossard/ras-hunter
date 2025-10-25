@@ -15,7 +15,7 @@ from sqlalchemy import String, DateTime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
-from backend.src.database import Base
+from database import Base
 
 if TYPE_CHECKING:
     from backend.src.models.submarine import Submarine

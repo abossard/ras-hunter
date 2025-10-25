@@ -1,6 +1,6 @@
 """API package."""
 
-from src.api.error_handlers import (
+from api.error_handlers import (
     ErrorResponse,
     http_exception_handler,
     validation_exception_handler,

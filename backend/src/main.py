@@ -12,13 +12,13 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from src.api.error_handlers import http_exception_handler, validation_exception_handler
-from src.cache.redis_client import close_redis, init_redis
-from src.config import get_settings
-from src.database import close_db, init_db
-from src.observability.logger import get_logger, init_logging
-from src.observability.metrics import init_metrics
-from src.observability.tracer import init_tracer, instrument_fastapi
+from api.error_handlers import http_exception_handler, validation_exception_handler
+from cache.redis_client import close_redis, init_redis
+from config import get_settings
+from database import close_db, init_db
+from observability.logger import get_logger, init_logging
+from observability.metrics import init_metrics
+from observability.tracer import init_tracer, instrument_fastapi
 
 # Initialize logging first
 init_logging()
