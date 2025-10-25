@@ -1,0 +1,32 @@
+[tool.poetry]
+name = "ras-hunter-mcp-server"
+version = "0.1.0"
+description = "MCP server wrapping Ras's Deep Treasure API for AI agent access"
+authors = ["Your Name <you@example.com>"]
+packages = [{include = "src"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+mcp = "^0.9.0"
+httpx = "^0.26.0"
+pydantic = "^2.5.3"
+python-dotenv = "^1.0.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.4"
+pytest-asyncio = "^0.23.3"
+ruff = "^0.1.13"
+mypy = "^1.8.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true

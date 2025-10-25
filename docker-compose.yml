@@ -1,0 +1,192 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: ras-hunter-postgres
+    environment:
+      POSTGRES_USER: ras_hunter
+      POSTGRES_PASSWORD: dev_password
+      POSTGRES_DB: ras_hunter
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ras_hunter"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ras-hunter-network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: ras-hunter-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ras-hunter-network
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ras-hunter-backend
+    environment:
+      # Database
+      DATABASE_URL: postgresql+asyncpg://ras_hunter:dev_password@postgres:5432/ras_hunter
+      # Redis
+      REDIS_URL: redis://redis:6379/0
+      REDIS_MAX_CONNECTIONS: 10
+      # JWT
+      JWT_SECRET: change-me-in-production-min-32-characters-required
+      JWT_ALGORITHM: HS256
+      JWT_EXPIRATION_HOURS: 24
+      # Server
+      HOST: 0.0.0.0
+      PORT: 8000
+      WORKERS: 4
+      RELOAD: "false"
+      # Game Configuration
+      MAP_SIZE: 32
+      MAX_PLAYERS: 20
+      OXYGEN_MAX: 20
+      DISCOVERY_COOLDOWN_SECONDS: 8
+      SURFACE_DURATION_SECONDS: 60
+      INACTIVITY_TIMEOUT_MINUTES: 10
+      # OpenTelemetry
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      OTEL_SERVICE_NAME: ras-hunter-backend
+      OTEL_TRACES_ENABLED: "true"
+      OTEL_METRICS_ENABLED: "true"
+      # CORS
+      CORS_ORIGINS: '["http://localhost:5173","http://localhost:3000","http://localhost:8080"]'
+      # Logging
+      LOG_LEVEL: INFO
+      LOG_FORMAT: json
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - ras-hunter-network
+
+  # MCP Server (AI Agent Interface)
+  mcp-server:
+    build:
+      context: ./mcp-server
+      dockerfile: Dockerfile
+    container_name: ras-hunter-mcp-server
+    environment:
+      BACKEND_URL: http://backend:8000
+      LOG_LEVEL: INFO
+    ports:
+      - "8001:8001"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - ras-hunter-network
+
+  # Frontend (React Web UI)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ras-hunter-frontend
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000
+      VITE_WS_BASE_URL: ws://localhost:8000
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    networks:
+      - ras-hunter-network
+
+  # Jaeger (Distributed Tracing)
+  jaeger:
+    image: jaegertracing/all-in-one:1.51
+    container_name: ras-hunter-jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "4318:4318"    # OTLP HTTP
+      - "4317:4317"    # OTLP gRPC
+    networks:
+      - ras-hunter-network
+      - observability
+
+  # Prometheus (Metrics)
+  prometheus:
+    image: prom/prometheus:v2.48.1
+    container_name: ras-hunter-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - ras-hunter-network
+      - observability
+
+  # Grafana (Dashboards)
+  grafana:
+    image: grafana/grafana:10.2.3
+    container_name: ras-hunter-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_INSTALL_PLUGINS: ""
+    ports:
+      - "3001:3000"
+    volumes:
+      - ./observability/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+      - jaeger
+    networks:
+      - observability
+
+volumes:
+  postgres-data:
+    driver: local
+  redis-data:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
+
+networks:
+  ras-hunter-network:
+    driver: bridge
+  observability:
+    driver: bridge
