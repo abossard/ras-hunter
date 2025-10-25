@@ -14,22 +14,20 @@ WORKDIR /app
 # Copy dependency files
 COPY pyproject.toml poetry.lock* ./
 
-# Install dependencies (no virtualenv needed in container)
+# Install dependencies (no virtualenv, only production dependencies, with retries)
 RUN poetry config virtualenvs.create false \
-    && poetry install --no-interaction --no-ansi --no-root
+    && poetry install --no-interaction --no-ansi --no-root --only main \
+    || poetry install --no-interaction --no-ansi --no-root --only main \
+    || poetry install --no-interaction --no-ansi --no-root --only main
 
 # Copy application code
 COPY src/ ./src/
 
 # Install the package
-RUN poetry install --no-interaction --no-ansi
+RUN poetry install --no-interaction --no-ansi --only main
 
 # Expose MCP server port
 EXPOSE 8001
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:8001/health || exit 1
 
 # Run MCP server
 CMD ["python", "-m", "src.server"]
